@@ -1,2 +1,2 @@
-# -shopee-verification
+# shopee-verification
 Shopee verification pag
